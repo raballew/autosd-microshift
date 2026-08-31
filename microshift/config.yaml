@@ -1,0 +1,16 @@
+apiServer:
+  advertiseAddress: ""
+  subjectAltNames: []
+
+network:
+  clusterNetwork:
+    - 10.42.0.0/16
+  serviceNetwork:
+    - 10.43.0.0/16
+
+dns:
+  baseDomain: microshift.example.local
+
+node:
+  hostnameOverride: ""
+  nodeIP: ""

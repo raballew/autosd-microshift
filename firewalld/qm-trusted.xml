@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone target="ACCEPT">
+  <short>Trusted</short>
+  <description>All network connections are accepted.</description>
+  <!-- MicroShift pod network -->
+  <source address="10.42.0.0/16"/>
+  <!-- MicroShift host endpoint used by the API server -->
+  <source address="169.254.169.1/32"/>
+</zone>

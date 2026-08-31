@@ -1,0 +1,3 @@
+*.qcow2.gz
+.envrc
+microshift/pull-secret.json

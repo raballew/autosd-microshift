@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone>
+  <short>Public</short>
+  <description>For use in public areas. Only selected connections are accepted.</description>
+  <service name="ssh"/>
+  <service name="dhcpv6-client"/>
+  <!-- MicroShift Kubernetes API server and console, published from the QM container -->
+  <port port="6443" protocol="tcp"/>
+  <port port="443" protocol="tcp"/>
+  <port port="80" protocol="tcp"/>
+</zone>

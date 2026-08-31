@@ -1,0 +1,89 @@
+name: autosd-microshift
+version: "0.1.0"
+target: qemu-aarch64
+
+# Root partition — runs the QM container and exposes its ports via firewalld
+content:
+  repos:
+    - id: automotive_sig
+      baseurl: https://mirror.stream.centos.org/SIGs/10-stream/autosd/$arch/packages-main/
+  rpms:
+    - firewalld
+    - NetworkManager
+    - openssh-server
+    - podman
+  add_files:
+    # Publish QM's port 6443 (MicroShift API) to the host network
+    - path: /etc/containers/systemd/qm.container.d/10-microshift-ports.conf
+      source_path: qm.container.d/10-microshift-ports.conf
+    # Allow external access to the published ports
+    - path: /etc/firewalld/zones/public.xml
+      source_path: firewalld/public.xml
+    # Embed SSH public key and sshd drop-in so root can log in with the key
+    - path: /etc/ssh/authorized_keys
+      source_path: ssh-authorized-keys
+    - path: /etc/ssh/sshd_config.d/90-authorized-keys.conf
+      source_path: sshd-authorized-keys.conf
+  systemd:
+    enabled_services:
+      - firewalld.service
+      - NetworkManager.service
+
+# QM partition — isolated container that runs MicroShift
+qm:
+  content:
+    repos:
+      - id: microshift-ocp-dev-preview
+        baseurl: https://mirror.openshift.com/pub/openshift-v5/aarch64/microshift/ocp-dev-preview/latest-5.0/el10/os/
+        priority: 10
+      # cri-o, cri-tools, openshift-clients (el9 packages; no el10 equivalent exists yet)
+      - id: openshift-mirror-4.22-beta
+        baseurl: https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rpms/4.22-el9-beta/
+        priority: 20
+      - id: openshift-mirror-4.23-beta
+        baseurl: https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rpms/4.23-el9-beta/
+        priority: 20
+    rpms:
+      - microshift
+      - microshift-networking
+      - firewalld
+    add_files:
+      - path: /etc/microshift/config.yaml
+        source_path: microshift/config.yaml
+      # MicroShift pod/service CIDRs and the host-endpoint IP must be trusted inside QM
+      - path: /etc/firewalld/zones/trusted.xml
+        source_path: firewalld/qm-trusted.xml
+      - path: /etc/systemd/system/microshift-make-rshared.service
+        source_path: microshift/microshift-make-rshared.service
+      # Pull secret for MicroShift to pull component images from registry.redhat.io at runtime.
+      # Obtain from console.redhat.com -> Downloads -> Pull secret, save as microshift/pull-secret.json
+      - path: /etc/crio/openshift-pull-secret
+        source_path: microshift/pull-secret.json
+    make_dirs:
+      - path: /var/log/journal
+        mode: 0755
+        parents: true
+        exist_ok: true
+    systemd:
+      enabled_services:
+        - firewalld.service
+        - microshift-make-rshared.service
+        - microshift.service
+
+image:
+  image_size: "8 GiB"
+  selinux_mode: enforcing
+  partitions:
+    var_qm:
+      # Dedicate 30 % of /var to QM container storage (etcd, container images)
+      relative_size: 0.3
+
+auth:
+  # password: testpassword  (matches AUTOSD_ROOT_PASSWORD default in tests/conftest.py)
+  root_password: "$6$oiuI03SwxfSWmW87$q9rO7I5wDwp.DhG1E6mE/aiaE4nv.pt95QcbHrc1ybJ7K9Z5deHECc9EG8c9D/Ph6ilp4lIDexfCNaCRwNZHD0"
+  sshd_config:
+    PasswordAuthentication: true
+    PermitRootLogin: true
+
+network:
+  dynamic: {}

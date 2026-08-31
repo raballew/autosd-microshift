@@ -1,0 +1,12 @@
+[Unit]
+Description=Make root filesystem shared for MicroShift
+Before=microshift.service
+ConditionVirtualization=container
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mount --make-rshared /
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
