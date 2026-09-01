@@ -1,0 +1,13 @@
+[Unit]
+Description=Set system clock from HTTPS Date header when NTP is unavailable
+Before=chronyd.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/http-timesync.sh
+
+[Install]
+WantedBy=multi-user.target

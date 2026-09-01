@@ -1,6 +1,10 @@
 name: autosd-microshift
 version: "0.1.0"
-target: qemu-aarch64
+target: qemu
+
+kernel:
+  kernel_package: kernel-automotive
+  kernel_version: "6.12.0-264_custom.el10iv"
 
 # Root partition — runs the QM container and exposes its ports via firewalld
 content:
@@ -8,26 +12,57 @@ content:
     - id: automotive_sig
       baseurl: https://mirror.stream.centos.org/SIGs/10-stream/autosd/$arch/packages-main/
   rpms:
+    - chrony
     - firewalld
     - NetworkManager
     - openssh-server
     - podman
   add_files:
+    # Override initramfs compression to gzip — the kernel's LZ4 decompressor
+    # (decompress_unlz4.c) only handles legacy format chunks up to 8 MiB; the
+    # lz4 tool in modern CentOS 10 rootfs writes blocks that LZ4_decompress_safe
+    # rejects, causing "Initramfs unpacking failed: Decoding failed" on every boot.
+    - path: /etc/dracut.conf.d/91-gzip.conf
+      source_path: dracut.conf.d/91-gzip.conf
     # Publish QM's port 6443 (MicroShift API) to the host network
     - path: /etc/containers/systemd/qm.container.d/10-microshift-ports.conf
       source_path: qm.container.d/10-microshift-ports.conf
+    # Restore CAP_SYS_RESOURCE (dropped by QM base) so privileged pods inside QM
+    # can write oom_score_adj and call capset; also expose /dev/kmsg to kubelet.
+    - path: /etc/containers/systemd/qm.container.d/20-microshift-caps.conf
+      source_path: qm.container.d/20-microshift-caps.conf
     # Allow external access to the published ports
     - path: /etc/firewalld/zones/public.xml
       source_path: firewalld/public.xml
+    # Allow DNAT'd packets from loopback to be forwarded to the QM bridge network.
+    # Required so that podman's PREROUTING DNAT (localhost:6443 -> 10.88.0.7:6443)
+    # can be forwarded across interfaces.
+    - path: /etc/sysctl.d/90-microshift-net.conf
+      source_path: sysctl/90-microshift-net.conf
     # Embed SSH public key and sshd drop-in so root can log in with the key
     - path: /etc/ssh/authorized_keys
       source_path: ssh-authorized-keys
     - path: /etc/ssh/sshd_config.d/90-authorized-keys.conf
       source_path: sshd-authorized-keys.conf
+    # Load openvswitch kernel module on first boot so OVS is available in QM
+    - path: /etc/modules-load.d/openvswitch.conf
+      source_path: modules-load.d/openvswitch.conf
+    # Set system clock from HTTPS Date header before chronyd starts (NTP UDP blocked in QEMU)
+    - path: /usr/bin/http-timesync.sh
+      source_path: http-timesync.sh
+    - path: /etc/systemd/system/http-timesync.service
+      source_path: http-timesync.service
+  chmod_files:
+    - path: /usr/bin/http-timesync.sh
+      mode: "0755"
+      recursive: false
   systemd:
     enabled_services:
+      - chronyd.service
       - firewalld.service
+      - http-timesync.service
       - NetworkManager.service
+      - sshd.service
 
 # QM partition — isolated container that runs MicroShift
 qm:
@@ -53,8 +88,45 @@ qm:
       # MicroShift pod/service CIDRs and the host-endpoint IP must be trusted inside QM
       - path: /etc/firewalld/zones/trusted.xml
         source_path: firewalld/qm-trusted.xml
+      # Allow MicroShift API port from the podman bridge host (10.88.0.1)
+      - path: /etc/firewalld/zones/public.xml
+        source_path: firewalld/qm-public.xml
       - path: /etc/systemd/system/microshift-make-rshared.service
         source_path: microshift/microshift-make-rshared.service
+      # Remount /proc/sys writable before CRI-O starts so pinns can set pod sysctls.
+      # Without this, all pod sandbox creation fails with "Read-only file system".
+      - path: /etc/systemd/system/remount-proc-sys.service
+        source_path: microshift/remount-proc-sys.service
+      # iptables-to-nft wrapper: the custom kernel lacks nft_compat.ko and related
+      # modules, so the standard iptables-nft binary cannot function. This Python
+      # wrapper translates iptables calls into equivalent nft commands at runtime.
+      # The ovnkube-master DaemonSet mounts these files over /usr/sbin/iptables.
+      - path: /etc/microshift/bin/iptables-nft-wrapper.py
+        source_path: microshift/bin/iptables-nft-wrapper.py
+      - path: /etc/microshift/bin/ip6tables-nft-wrapper.py
+        source_path: microshift/bin/ip6tables-nft-wrapper.py
+      - path: /etc/microshift/bin/iptables-wrapper.sh
+        source_path: microshift/bin/iptables-wrapper.sh
+      - path: /etc/microshift/bin/ip6tables-wrapper.sh
+        source_path: microshift/bin/ip6tables-wrapper.sh
+      # Post-start patcher: applies DaemonSet patches required for this kernel after
+      # MicroShift creates its built-in workloads on first boot.
+      - path: /etc/microshift/microshift-ovnk-patch.sh
+        source_path: microshift/microshift-ovnk-patch.sh
+      - path: /etc/systemd/system/microshift-ovnk-patch.service
+        source_path: microshift/microshift-ovnk-patch.service
+      # br-ex OVS bridge must exist before MicroShift validates OVN-K config
+      - path: /etc/systemd/system/br-ex-setup.service
+        source_path: microshift/br-ex-setup.service
+      # Permissive container policy so CRI-O can pull images without signature check
+      - path: /etc/containers/policy.json
+        source_path: microshift/containers-policy.json
+      # Use cgroupfs instead of systemd cgroup manager (dbus-broker fails in QM)
+      - path: /etc/crio/crio.conf.d/10-cgroupfs.conf
+        source_path: microshift/crio-cgroupfs.conf
+      # MicroShift must not time out while OVN-K pods are starting
+      - path: /etc/systemd/system/microshift.service.d/10-timeout.conf
+        source_path: microshift/microshift-timeout.conf
       # Pull secret for MicroShift to pull component images from registry.redhat.io at runtime.
       # Obtain from console.redhat.com -> Downloads -> Pull secret, save as microshift/pull-secret.json
       - path: /etc/crio/openshift-pull-secret
@@ -64,15 +136,33 @@ qm:
         mode: 0755
         parents: true
         exist_ok: true
+      - path: /etc/microshift/bin
+        mode: 0755
+        parents: true
+        exist_ok: true
+      - path: /etc/systemd/system/microshift.service.d
+        mode: 0755
+        parents: true
+        exist_ok: true
+    chmod_files:
+      - path: /etc/microshift/microshift-ovnk-patch.sh
+        mode: "0755"
+        recursive: false
+      - path: /etc/microshift/bin
+        mode: "0755"
+        recursive: true
     systemd:
       enabled_services:
         - firewalld.service
         - microshift-make-rshared.service
         - microshift.service
+        - remount-proc-sys.service
+        - microshift-ovnk-patch.service
+        - br-ex-setup.service
 
 image:
-  image_size: "8 GiB"
-  selinux_mode: enforcing
+  image_size: "5 GiB"
+  selinux_mode: permissive
   partitions:
     var_qm:
       # Dedicate 30 % of /var to QM container storage (etcd, container images)

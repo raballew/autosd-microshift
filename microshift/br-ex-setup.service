@@ -1,0 +1,15 @@
+[Unit]
+Description=Create br-ex OVS bridge for OVN-Kubernetes
+Before=microshift.service
+After=openvswitch.service
+Requires=openvswitch.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/ovs-vsctl --may-exist add-br br-ex
+ExecStart=/usr/bin/ovs-vsctl set bridge br-ex fail-mode=standalone
+ExecStart=/usr/sbin/ip link set br-ex up
+
+[Install]
+WantedBy=multi-user.target

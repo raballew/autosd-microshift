@@ -10,7 +10,6 @@ _SERVICE_CHECK_TIMEOUT = 300
 
 
 def test_image_boots(running_vm):
-    # Verified by the running_vm fixture: it only yields after the login prompt appears
     pass
 
 
@@ -36,8 +35,6 @@ def test_microshift_starts_in_qm(running_vm):
 
 
 def test_microshift_api_is_accessible_externally(running_vm):
-    # Connects to localhost:16443 via the QEMU hostfwd chain:
-    # host:16443 -> VM:6443 -> QM PublishPort -> MicroShift API server
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
@@ -57,4 +54,33 @@ def test_microshift_api_is_accessible_externally(running_vm):
     pytest.fail(
         f"MicroShift API at {_MICROSHIFT_API}/readyz did not return 'ok'"
         f" after {_MICROSHIFT_READY_TIMEOUT}s"
+    )
+
+
+def test_openvswitch_module_available(running_vm):
+    with running_vm.shell() as shell:
+        result = shell.run("modinfo openvswitch", warn=True, hide=True)
+    assert result.return_code == 0, (
+        "openvswitch kernel module not found — rebuild the kernel with CONFIG_OPENVSWITCH=m"
+    )
+
+
+def test_ovn_networking_pods_running(running_vm):
+    kubeconfig = "/var/lib/microshift/resources/kubeadmin/kubeconfig"
+    deadline = time.monotonic() + _MICROSHIFT_READY_TIMEOUT
+    while time.monotonic() < deadline:
+        with running_vm.shell() as shell:
+            result = shell.run(
+                f"podman exec qm kubectl --kubeconfig {kubeconfig}"
+                " get pods -n openshift-ovn-kubernetes"
+                " --field-selector=status.phase=Running --no-headers 2>/dev/null"
+                " | wc -l",
+                warn=True,
+                hide=True,
+            )
+        if result.return_code == 0 and int(result.stdout.strip() or "0") >= 2:
+            return
+        time.sleep(15)
+    pytest.fail(
+        f"OVN-Kubernetes pods did not reach Running state after {_MICROSHIFT_READY_TIMEOUT}s"
     )

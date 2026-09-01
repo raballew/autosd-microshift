@@ -1,0 +1,13 @@
+[Unit]
+Description=Remount /proc/sys writable for pod sysctl operations
+DefaultDependencies=no
+Before=crio.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/mount -o remount,rw /proc/sys
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
