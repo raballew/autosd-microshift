@@ -103,7 +103,10 @@ qm:
       # Without this, all pod sandbox creation fails with "Read-only file system".
       - path: /etc/systemd/system/remount-proc-sys.service
         source_path: microshift/remount-proc-sys.service
-      # Permissive container policy so CRI-O can pull images without signature check
+      # Permissive container policy so CRI-O can pull images without signature check.
+      # CRI-O in this version only looks at /etc/containers/policy.json and
+      # ~/.config/containers/policy.json; it does not fall back to
+      # /usr/share/containers/policy.json.
       - path: /etc/containers/policy.json
         source_path: microshift/containers-policy.json
       # Use cgroupfs instead of systemd cgroup manager (dbus-broker fails in QM)
