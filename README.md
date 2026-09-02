@@ -236,27 +236,6 @@ export AUTOSD_DISK_IMAGE=autosd-microshift.qcow2
 cd tests && pytest -v
 ```
 
-## Repository layout
-
-```
-autosd-microshift.aib.yml   AIB manifest — single source of truth for the image
-http-timesync.sh            Clock bootstrap script (runs before chronyd)
-http-timesync.service       Systemd unit for clock bootstrap
-dracut.conf.d/              Override initramfs compression to gzip
-firewalld/                  Firewall zone configs and policies for host and QM
-modules-load.d/             Load openvswitch kernel module on boot
-qm.container.d/             QM container drop-ins (port publish, capabilities)
-sysctl/                     Sysctl tweaks for DNAT forwarding
-microshift/
-  config.yaml               MicroShift cluster config (CIDRs, cgroup driver)
-  microshift-ovnk-patch.sh  Post-start DaemonSet patcher
-  bin/                      iptables-to-nft wrappers (mounted into ovnkube-master)
-  pull-secret.json.example  Template — copy to pull-secret.json and fill in tokens
-tests/
-  conftest.py               Pytest fixtures (local QEMU via Jumpstarter SDK)
-  test_microshift.py        Integration tests
-```
-
 ## Design notes
 
 **Custom kernel**: The upstream automotive kernel lacks `CONFIG_OPENVSWITCH`
