@@ -8,4 +8,7 @@
   <port port="6443" protocol="tcp"/>
   <port port="443" protocol="tcp"/>
   <port port="80" protocol="tcp"/>
+  <!-- SNAT for QM container (10.88.0.0/16) going out through enp0s1; the corresponding
+       FORWARD accept is in firewalld/policies/podman-forward.xml -->
+  <masquerade/>
 </zone>

@@ -34,6 +34,11 @@ content:
     # Allow external access to the published ports
     - path: /etc/firewalld/zones/public.xml
       source_path: firewalld/public.xml
+    # Allow QM container (10.88.0.0/16) traffic through the FORWARD chain to the
+    # public zone. Netavark adds accept at nftables priority 0, but if its interface
+    # name does not match, firewalld's priority-10 FORWARD reject drops the packet.
+    - path: /etc/firewalld/policies/podman-forward.xml
+      source_path: firewalld/podman-forward.xml
     # Allow DNAT'd packets from loopback to be forwarded to the QM bridge network.
     # Required so that podman's PREROUTING DNAT (localhost:6443 -> 10.88.0.7:6443)
     # can be forwarded across interfaces.
@@ -52,6 +57,11 @@ content:
       source_path: http-timesync.sh
     - path: /etc/systemd/system/http-timesync.service
       source_path: http-timesync.service
+  make_dirs:
+    - path: /etc/firewalld/policies
+      mode: 0755
+      parents: true
+      exist_ok: true
   chmod_files:
     - path: /usr/bin/http-timesync.sh
       mode: "0755"

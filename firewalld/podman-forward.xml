@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<policy>
+  <ingress-zone name="ANY"/>
+  <egress-zone name="public"/>
+  <rule family="ipv4">
+    <source address="10.88.0.0/16"/>
+    <accept/>
+  </rule>
+</policy>

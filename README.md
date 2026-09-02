@@ -1,8 +1,10 @@
 # autosd-microshift
 
-AutoSD image with MicroShift running in the QM partition, built with a custom
-automotive kernel that includes `CONFIG_OPENVSWITCH=m`. Targets a virtual
-aarch64 QEMU exporter managed by Jumpstarter.
+Bootc (image mode) AutoSD image with MicroShift running in the QM partition,
+built with a custom automotive kernel that includes `CONFIG_OPENVSWITCH=m`.
+The image has an immutable `/usr` backed by composefs-overlay with
+`verity=require` and is managed by the `bootc` CLI. Targets a virtual aarch64
+QEMU exporter managed by Jumpstarter.
 
 ## Prerequisites
 
@@ -122,22 +124,26 @@ RPM. The version is printed in the `Wrote:` line of the SRPM step, e.g.
 ## Step 3: Build and flash the image
 
 ```bash
-caib image build-dev autosd-microshift.aib.yml \
+caib image build autosd-microshift.aib.yml \
   --extra-repo kernel-build:/workspace/kernel-repo \
-  --mode image \
-  --format raw \
-  --compress gzip \
   -a arm64 \
   --internal-registry \
+  --disk \
+  -D sign_kernel_modules=False \
   --flash \
   --exporter "target=qemu"
 ```
+
+`-D sign_kernel_modules=False` skips the `kernel-automotive-devel` requirement
+that AIB enables by default in bootc (image) mode for kernel-automotive packages.
+The custom kernel RPMs are in the workspace repo but the osbuild depsolve runs in
+the builder pod where the workspace HTTP server is not reachable.
 
 On success the command prints a **Lease ID**. Keep it — every subsequent `jmp`
 command needs it.
 
 ```
-Lease ID: 01a05d0b-99a9-736b-9753-d1a19d95af10
+Lease ID: <lease-id>
 ```
 
 ## Step 4: Boot the device
@@ -164,7 +170,7 @@ Open a dedicated terminal and keep it running for the duration of your session:
 
 ```bash
 export JMP_LEASE=<lease-id>
-jmp shell -- j ssh -L 16443:localhost:6443 -N
+jmp shell -- j ssh -- -L 16443:localhost:6443 -N
 ```
 
 This tunnels `localhost:16443` on your machine to port 6443 on the QEMU VM
@@ -221,11 +227,10 @@ OCI reference:
 
 ```bash
 # Build a local disk image first (no --flash)
-caib image build-dev autosd-microshift.aib.yml \
+caib image build autosd-microshift.aib.yml \
   --extra-repo kernel-build:/workspace/kernel-repo \
-  --mode image \
-  --format qcow2 \
-  -a arm64
+  -a arm64 \
+  -D sign_kernel_modules=False
 
 export AUTOSD_DISK_IMAGE=autosd-microshift.qcow2
 cd tests && pytest -v
@@ -239,7 +244,7 @@ exporter.yaml               Jumpstarter QEMU exporter config
 http-timesync.sh            Clock bootstrap script (runs before chronyd)
 http-timesync.service       Systemd unit for clock bootstrap
 dracut.conf.d/              Override initramfs compression to gzip
-firewalld/                  Firewall zone configs for host and QM
+firewalld/                  Firewall zone configs and policies for host and QM
 modules-load.d/             Load openvswitch kernel module on boot
 qm.container.d/             QM container drop-ins (port publish, capabilities)
 sysctl/                     Sysctl tweaks for DNAT forwarding
@@ -277,3 +282,22 @@ with one that uses `nft` directly for conntrack bypass rules.
 **QM isolation**: MicroShift runs inside a QM (Quality Management) container.
 QM's `/etc` is bind-mounted from the host's `/etc/qm/`, so AIB places QM
 configuration files there via the `qm:` section of the manifest.
+
+**Bootc / image mode**: The manifest uses `caib image build` (not `build-dev`)
+to produce a proper bootc OCI container image with an immutable `/usr`. The
+osbuild depsolve runs inside the builder pod where the workspace HTTP server
+hosting the custom kernel RPMs is unreachable, so `-D sign_kernel_modules=False`
+must be passed to suppress the `kernel-automotive-devel` requirement that AIB
+injects in bootc mode for automotive kernels.
+
+**Firewalld forwarding for Podman bridge**: Podman's Netavark network backend
+adds nftables masquerade and forward-accept rules at priority 0. Firewalld runs
+its FORWARD chains at priority 10 (filter). When Netavark's interface-match
+differs from what firewalld expects, firewalld's `reject with icmpx
+admin-prohibited` fires before packets from the QM bridge (`10.88.0.0/16`) can
+leave through `enp0s1`. `firewalld/policies/podman-forward.xml` defines a
+firewalld policy (ingress ANY, egress public) that explicitly accepts
+`10.88.0.0/16` traffic within firewalld's own processing order, and
+`firewalld/zones/public.xml` adds masquerade so those packets are SNAT'd.
+Without this, OVN-K pods stay in `ContainerCreating` because DNS (`10.0.2.3`)
+is unreachable from inside QM.
