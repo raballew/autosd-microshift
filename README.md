@@ -240,7 +240,6 @@ cd tests && pytest -v
 
 ```
 autosd-microshift.aib.yml   AIB manifest — single source of truth for the image
-exporter.yaml               Jumpstarter QEMU exporter config
 http-timesync.sh            Clock bootstrap script (runs before chronyd)
 http-timesync.service       Systemd unit for clock bootstrap
 dracut.conf.d/              Override initramfs compression to gzip
