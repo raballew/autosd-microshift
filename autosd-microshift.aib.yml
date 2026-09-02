@@ -103,9 +103,6 @@ qm:
       # Without this, all pod sandbox creation fails with "Read-only file system".
       - path: /etc/systemd/system/remount-proc-sys.service
         source_path: microshift/remount-proc-sys.service
-      # br-ex OVS bridge must exist before MicroShift validates OVN-K config
-      - path: /etc/systemd/system/br-ex-setup.service
-        source_path: microshift/br-ex-setup.service
       # Permissive container policy so CRI-O can pull images without signature check
       - path: /etc/containers/policy.json
         source_path: microshift/containers-policy.json
@@ -146,7 +143,6 @@ qm:
         - microshift.service
         - ovnkube-sysctl-patch.service
         - remount-proc-sys.service
-        - br-ex-setup.service
 
 image:
   image_size: "5 GiB"
