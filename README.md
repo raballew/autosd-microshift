@@ -238,44 +238,55 @@ cd tests && pytest -v
 
 ## Design notes
 
-**Custom kernel**: The upstream automotive kernel lacks `CONFIG_OPENVSWITCH`
-and has `CONFIG_VIRTIO_NET=m`. OVN-Kubernetes requires the OVS kernel module.
-The kernel is built from `centos-stream-10` with `DISTLOCALVERSION=_custom`
-and consumed via an extra DNF repo exposed from the `kernel-build` workspace.
+**Kernel: `CONFIG_OPENVSWITCH=m` added**: The stock `kernel-automotive` does
+not enable Open vSwitch, which OVN-Kubernetes requires for the data-plane.
+The kernel is rebuilt from `centos-stream-10` source with
+`DISTLOCALVERSION=_custom` to add `CONFIG_OPENVSWITCH=m`.
 
-**Clock bootstrapping**: QEMU exporters boot with a stale RTC (~2 weeks in
-the past). TLS certificates are not yet valid at that timestamp, blocking
-image pulls. `http-timesync.service` retries `curl -k` against an HTTPS
-endpoint, extracts the `Date:` response header, and calls `date -s` to correct
-the clock before `chronyd` takes over. The `-k` flag is necessary because cert
-validation itself fails until the clock is correct.
+**Kernel: no `nft_compat` — iptables replaced with nft wrappers**: The custom
+kernel does not include `nft_compat.ko`, so the standard `iptables-nft` binary
+fails at runtime. `microshift-ovnk-patch.service` fires once MicroShift's API
+is up and patches the `ovnkube-master`, `ovnkube-node`, and `node-resolver`
+DaemonSets to replace `iptables` calls with Python scripts that translate them
+to direct `nft` commands.
 
-**OVN-Kubernetes patches**: The custom kernel lacks `nft_compat.ko`, so the
-standard `iptables-nft` binary cannot work. `microshift-ovnk-patch.service`
-runs immediately after the MicroShift API becomes available and patches the
-`ovnkube-master`, `ovnkube-node`, and `node-resolver` DaemonSets to mount
-Python-based iptables-to-nft wrapper scripts and to replace the startup script
-with one that uses `nft` directly for conntrack bypass rules.
+**Bootc build: `sign_kernel_modules=False` required**: AIB defaults to
+requiring `kernel-automotive-devel` in bootc mode to sign out-of-tree modules.
+The osbuild depsolve runs inside the builder pod where the workspace HTTP
+server hosting the custom kernel RPMs is not reachable, so the depsolve fails.
+Passing `-D sign_kernel_modules=False` disables that requirement.
 
-**QM isolation**: MicroShift runs inside a QM (Quality Management) container.
-QM's `/etc` is bind-mounted from the host's `/etc/qm/`, so AIB places QM
-configuration files there via the `qm:` section of the manifest.
+**QEMU clock: corrected before chronyd starts**: QEMU exporters boot with a
+stale RTC (~2 weeks behind). TLS certificate validation fails at the wrong
+timestamp, blocking image pulls inside QM. `http-timesync.service` fetches the
+`Date:` header from an HTTPS endpoint with `curl -k` (skipping cert validation,
+which is itself broken until the clock is fixed) and calls `date -s` before
+`chronyd` takes over.
 
-**Bootc / image mode**: The manifest uses `caib image build` (not `build-dev`)
-to produce a proper bootc OCI container image with an immutable `/usr`. The
-osbuild depsolve runs inside the builder pod where the workspace HTTP server
-hosting the custom kernel RPMs is unreachable, so `-D sign_kernel_modules=False`
-must be passed to suppress the `kernel-automotive-devel` requirement that AIB
-injects in bootc mode for automotive kernels.
+**Initramfs: gzip forced**: The kernel's LZ4 decompressor
+(`decompress_unlz4.c`) rejects block sizes written by modern `lz4` tooling,
+causing `Initramfs unpacking failed: Decoding failed` on every boot.
+`dracut.conf.d/91-gzip.conf` switches to gzip.
 
-**Firewalld forwarding for Podman bridge**: Podman's Netavark network backend
-adds nftables masquerade and forward-accept rules at priority 0. Firewalld runs
-its FORWARD chains at priority 10 (filter). When Netavark's interface-match
-differs from what firewalld expects, firewalld's `reject with icmpx
-admin-prohibited` fires before packets from the QM bridge (`10.88.0.0/16`) can
-leave through `enp0s1`. `firewalld/policies/podman-forward.xml` defines a
-firewalld policy (ingress ANY, egress public) that explicitly accepts
-`10.88.0.0/16` traffic within firewalld's own processing order, and
-`firewalld/zones/public.xml` adds masquerade so those packets are SNAT'd.
-Without this, OVN-K pods stay in `ContainerCreating` because DNS (`10.0.2.3`)
-is unreachable from inside QM.
+**QM: cgroupfs driver**: MicroShift and CRI-O are configured to use the
+`cgroupfs` cgroup driver (`crio.conf.d/10-cgroupfs.conf`,
+`microshift/config.yaml`). The systemd cgroup driver requires `dbus-broker`,
+which is not available inside the QM container.
+
+**QM: `/proc/sys` remounted writable**: QM mounts `/proc/sys` read-only.
+`remount-proc-sys.service` remounts it writable before CRI-O starts; without
+this, `pinns` cannot set pod sysctls and every pod sandbox creation fails.
+
+**QM: `CAP_SYS_RESOURCE` restored**: The QM base container drops
+`CAP_SYS_RESOURCE`. Kubelet and privileged pods need it to write
+`oom_score_adj` and call `capset`. `qm.container.d/20-microshift-caps.conf`
+adds it back along with `/dev/kmsg` access.
+
+**Firewalld FORWARD policy for Podman bridge**: Podman's Netavark backend adds
+nftables accept rules at priority 0, but firewalld's FORWARD chains run at
+priority 10 and reject unmatched traffic with `icmpx admin-prohibited`.
+When Netavark's interface match does not cover the path from the QM bridge
+(`10.88.0.0/16`) to `enp0s1`, DNS and image-pull traffic is dropped, leaving
+all OVN-K pods in `ContainerCreating`. `firewalld/policies/podman-forward.xml`
+adds an explicit firewalld policy that accepts this traffic within firewalld's
+own processing order.
