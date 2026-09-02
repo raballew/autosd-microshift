@@ -34,7 +34,7 @@ cat ~/.ssh/id_ed25519.pub > ssh-authorized-keys
 caib workspace create kernel-build \
   --cpu 60 \
   --memory 32Gi \
-  --image quay.io/bzlotnik/autosd-toolchain:latest
+  --image quay.io/rh-sdv-cloud/autosd-toolchain:latest
 
 # Wait until Running
 caib workspace list
