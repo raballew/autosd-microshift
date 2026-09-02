@@ -263,11 +263,6 @@ timestamp, blocking image pulls inside QM. `http-timesync.service` fetches the
 which is itself broken until the clock is fixed) and calls `date -s` before
 `chronyd` takes over.
 
-**Initramfs: gzip forced**: The kernel's LZ4 decompressor
-(`decompress_unlz4.c`) rejects block sizes written by modern `lz4` tooling,
-causing `Initramfs unpacking failed: Decoding failed` on every boot.
-`dracut.conf.d/91-gzip.conf` switches to gzip.
-
 **QM: cgroupfs driver**: MicroShift and CRI-O are configured to use the
 `cgroupfs` cgroup driver (`crio.conf.d/10-cgroupfs.conf`,
 `microshift/config.yaml`). The systemd cgroup driver requires `dbus-broker`,

@@ -18,12 +18,6 @@ content:
     - openssh-server
     - podman
   add_files:
-    # Override initramfs compression to gzip — the kernel's LZ4 decompressor
-    # (decompress_unlz4.c) only handles legacy format chunks up to 8 MiB; the
-    # lz4 tool in modern CentOS 10 rootfs writes blocks that LZ4_decompress_safe
-    # rejects, causing "Initramfs unpacking failed: Decoding failed" on every boot.
-    - path: /etc/dracut.conf.d/91-gzip.conf
-      source_path: dracut.conf.d/91-gzip.conf
     # Publish QM's port 6443 (MicroShift API) to the host network
     - path: /etc/containers/systemd/qm.container.d/10-microshift-ports.conf
       source_path: qm.container.d/10-microshift-ports.conf
