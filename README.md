@@ -265,8 +265,8 @@ which is itself broken until the clock is fixed) and calls `date -s` before
 
 **QM: cgroupfs driver**: MicroShift and CRI-O are configured to use the
 `cgroupfs` cgroup driver (`crio.conf.d/10-cgroupfs.conf`,
-`microshift/config.yaml`). The systemd cgroup driver requires `dbus-broker`,
-which is not available inside the QM container.
+`microshift/config.yaml`). The systemd cgroup driver did not work inside the
+QM container during bring-up; the root cause was not fully diagnosed.
 
 **QM: `/proc/sys` remounted writable**: QM mounts `/proc/sys` read-only.
 `remount-proc-sys.service` remounts it writable before CRI-O starts; without
