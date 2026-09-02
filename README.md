@@ -77,7 +77,7 @@ caib workspace exec kernel-build -- \
      /tmp/build/.config && \
    make mrproper && \
    make O=/tmp/build olddefconfig && \
-   make O=/tmp/build -j60"
+   make O=/tmp/build -j$(nproc --ignore=2)"
 ```
 
 Build the source RPM, install it, and build binary RPMs:
