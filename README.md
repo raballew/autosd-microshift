@@ -168,8 +168,8 @@ The first-boot sequence (automatic, no intervention needed):
    by fetching the `Date:` header from an HTTPS endpoint.
 2. `chronyd.service` — maintains ongoing NTP sync once the clock is sane.
 3. QM container starts; `microshift.service` comes up inside it.
-4. `microshift-ovnk-patch.service` — patches OVN-Kubernetes DaemonSets to
-   work with the custom kernel (no `nft_compat`, custom iptables wrappers).
+4. `ovnkube-sysctl-patch.service` — patches the ovnkube-master DaemonSet
+   startup command to ignore missing IPv6 sysctls (IPv6 disabled on host).
 
 MicroShift is ready in approximately 5 minutes.
 
@@ -256,12 +256,11 @@ explicitly disable OVS and its transitive selects (`CONFIG_MPLS`,
 `CONFIG_NET_NSH`); all must be patched before `dist-srpm` or the config
 validation step rejects the build.
 
-**Kernel: no `nft_compat` — iptables replaced with nft wrappers**: The custom
-kernel does not include `nft_compat.ko`, so the standard `iptables-nft` binary
-fails at runtime. `microshift-ovnk-patch.service` fires once MicroShift's API
-is up and patches the `ovnkube-master`, `ovnkube-node`, and `node-resolver`
-DaemonSets to replace `iptables` calls with Python scripts that translate them
-to direct `nft` commands.
+**Kernel: `kernel-automotive-modules-extra` required for `nft_compat`**:
+`nft_compat.ko` ships in `kernel-automotive-modules-extra`, not in the default
+`kernel-automotive-modules-core`. OVN-Kubernetes uses `iptables-nft` which
+requires `nft_compat` at runtime; without it every `iptables` call inside the
+OVN-K pods fails. The module is pre-loaded at boot via `modules-load.d`.
 
 **Bootc build: `sign_kernel_modules=False` required**: AIB defaults to
 requiring `kernel-automotive-devel` in bootc mode to sign out-of-tree modules.
@@ -287,10 +286,21 @@ the QM quadlet, cgroupfs is used instead.
 `remount-proc-sys.service` remounts it writable before CRI-O starts; without
 this, `pinns` cannot set pod sysctls and every pod sandbox creation fails.
 
-**QM: `CAP_SYS_RESOURCE` restored**: The QM base container drops
-`CAP_SYS_RESOURCE`. Kubelet and privileged pods need it to write
-`oom_score_adj` and call `capset`. `qm.container.d/20-microshift-caps.conf`
-adds it back along with `/dev/kmsg` access.
+**QM: dropped capabilities restored**: The QM base container drops several
+capabilities including `CAP_SYS_RESOURCE` and `CAP_SYS_BOOT`.
+`qm.container.d/20-microshift-caps.conf` clears the inherited drop list so
+that CRI-O and the OCI runtime (crun) can grant all capabilities to
+`privileged: true` OVN-K pods — crun calls `capset()` to set the full
+capability set for each pod, and any cap absent from QM's bounding set causes
+`EPERM`. `/dev/kmsg` is also exposed for kubelet.
+
+**OVN-K: IPv6 sysctl tolerance**: The QEMU exporter runs with IPv6 disabled at
+the host kernel level (`/proc/sys/net/ipv6/` does not exist). The default
+`ovnkube-master` container startup script uses `set -e` and calls
+`sysctl net.ipv6.conf.all.forwarding=1` without `|| true`, causing the
+container to crash immediately. `ovnkube-sysctl-patch.service` patches the
+DaemonSet command to append `|| true` to those sysctl lines so the container
+continues when IPv6 sysctls are unavailable.
 
 **Firewalld FORWARD policy for Podman bridge**: Podman's Netavark backend adds
 nftables accept rules at priority 0, but firewalld's FORWARD chains run at

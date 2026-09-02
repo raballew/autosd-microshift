@@ -1,0 +1,12 @@
+[Unit]
+Description=Patch ovnkube-master sysctl calls to tolerate missing IPv6
+After=microshift.service
+Requires=microshift.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/bin/ovnkube-sysctl-patch.py
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

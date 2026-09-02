@@ -14,6 +14,7 @@ content:
   rpms:
     - chrony
     - firewalld
+    - kernel-automotive-modules-extra-6.12.0-265_custom.el10iv
     - NetworkManager
     - openssh-server
     - podman
@@ -21,8 +22,9 @@ content:
     # Publish QM's port 6443 (MicroShift API) to the host network
     - path: /etc/containers/systemd/qm.container.d/10-microshift-ports.conf
       source_path: qm.container.d/10-microshift-ports.conf
-    # Restore CAP_SYS_RESOURCE (dropped by QM base) so privileged pods inside QM
-    # can write oom_score_adj and call capset; also expose /dev/kmsg to kubelet.
+    # Clear the inherited DropCapability list so QM's bounding set has all caps;
+    # crun calls capset() to grant privileged pods their full capability set and
+    # any cap missing from QM's bounding set causes EPERM. Expose /dev/kmsg too.
     - path: /etc/containers/systemd/qm.container.d/20-microshift-caps.conf
       source_path: qm.container.d/20-microshift-caps.conf
     # Allow external access to the published ports
@@ -43,7 +45,7 @@ content:
       source_path: ssh-authorized-keys
     - path: /etc/ssh/sshd_config.d/90-authorized-keys.conf
       source_path: sshd-authorized-keys.conf
-    # Load openvswitch kernel module on first boot so OVS is available in QM
+    # Load OVS and nft_compat kernel modules on first boot
     - path: /etc/modules-load.d/openvswitch.conf
       source_path: modules-load.d/openvswitch.conf
     # Set system clock from HTTPS Date header before chronyd starts (NTP UDP blocked in QEMU)
@@ -101,24 +103,6 @@ qm:
       # Without this, all pod sandbox creation fails with "Read-only file system".
       - path: /etc/systemd/system/remount-proc-sys.service
         source_path: microshift/remount-proc-sys.service
-      # iptables-to-nft wrapper: the custom kernel lacks nft_compat.ko and related
-      # modules, so the standard iptables-nft binary cannot function. This Python
-      # wrapper translates iptables calls into equivalent nft commands at runtime.
-      # The ovnkube-master DaemonSet mounts these files over /usr/sbin/iptables.
-      - path: /etc/microshift/bin/iptables-nft-wrapper.py
-        source_path: microshift/bin/iptables-nft-wrapper.py
-      - path: /etc/microshift/bin/ip6tables-nft-wrapper.py
-        source_path: microshift/bin/ip6tables-nft-wrapper.py
-      - path: /etc/microshift/bin/iptables-wrapper.sh
-        source_path: microshift/bin/iptables-wrapper.sh
-      - path: /etc/microshift/bin/ip6tables-wrapper.sh
-        source_path: microshift/bin/ip6tables-wrapper.sh
-      # Post-start patcher: applies DaemonSet patches required for this kernel after
-      # MicroShift creates its built-in workloads on first boot.
-      - path: /etc/microshift/microshift-ovnk-patch.sh
-        source_path: microshift/microshift-ovnk-patch.sh
-      - path: /etc/systemd/system/microshift-ovnk-patch.service
-        source_path: microshift/microshift-ovnk-patch.service
       # br-ex OVS bridge must exist before MicroShift validates OVN-K config
       - path: /etc/systemd/system/br-ex-setup.service
         source_path: microshift/br-ex-setup.service
@@ -135,12 +119,15 @@ qm:
       # Obtain from console.redhat.com -> Downloads -> Pull secret, save as microshift/pull-secret.json
       - path: /etc/crio/openshift-pull-secret
         source_path: microshift/pull-secret.json
+      # Patch ovnkube-master startup to ignore missing IPv6 sysctls (IPv6 is
+      # disabled on the QEMU exporter host; the default startup script uses
+      # set -e and crashes when sysctl net.ipv6.conf.* fails).
+      - path: /usr/bin/ovnkube-sysctl-patch.py
+        source_path: microshift/ovnkube-sysctl-patch.py
+      - path: /etc/systemd/system/ovnkube-sysctl-patch.service
+        source_path: microshift/ovnkube-sysctl-patch.service
     make_dirs:
       - path: /var/log/journal
-        mode: 0755
-        parents: true
-        exist_ok: true
-      - path: /etc/microshift/bin
         mode: 0755
         parents: true
         exist_ok: true
@@ -149,19 +136,16 @@ qm:
         parents: true
         exist_ok: true
     chmod_files:
-      - path: /etc/microshift/microshift-ovnk-patch.sh
+      - path: /usr/bin/ovnkube-sysctl-patch.py
         mode: "0755"
         recursive: false
-      - path: /etc/microshift/bin
-        mode: "0755"
-        recursive: true
     systemd:
       enabled_services:
         - firewalld.service
         - microshift-make-rshared.service
         - microshift.service
+        - ovnkube-sysctl-patch.service
         - remount-proc-sys.service
-        - microshift-ovnk-patch.service
         - br-ex-setup.service
 
 image:
