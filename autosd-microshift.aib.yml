@@ -4,7 +4,7 @@ target: qemu
 
 kernel:
   kernel_package: kernel-automotive
-  kernel_version: "6.12.0-264_custom.el10iv"
+  kernel_version: "6.12.0-265_custom.el10iv"
 
 # Root partition — runs the QM container and exposes its ports via firewalld
 content:
