@@ -32,7 +32,7 @@ cat ~/.ssh/id_ed25519.pub > ssh-authorized-keys
 
 ```bash
 caib workspace create kernel-build \
-  --cpu 30 \
+  --cpu 60 \
   --memory 32Gi \
   --image quay.io/bzlotnik/autosd-toolchain:latest
 
@@ -77,7 +77,7 @@ caib workspace exec kernel-build -- \
      /tmp/build/.config && \
    make mrproper && \
    make O=/tmp/build olddefconfig && \
-   make O=/tmp/build -j30"
+   make O=/tmp/build -j60"
 ```
 
 Build the source RPM, install it, and build binary RPMs:
@@ -265,8 +265,10 @@ which is itself broken until the clock is fixed) and calls `date -s` before
 
 **QM: cgroupfs driver**: MicroShift and CRI-O are configured to use the
 `cgroupfs` cgroup driver (`crio.conf.d/10-cgroupfs.conf`,
-`microshift/config.yaml`). The systemd cgroup driver did not work inside the
-QM container during bring-up; the root cause was not fully diagnosed.
+`microshift/config.yaml`). The systemd cgroup driver requires `Delegate=yes`
+on the QM container unit so that systemd hands ownership of that cgroup subtree
+to the container; without it CRI-O cannot create pod cgroups. Rather than patch
+the QM quadlet, cgroupfs is used instead.
 
 **QM: `/proc/sys` remounted writable**: QM mounts `/proc/sys` read-only.
 `remount-proc-sys.service` remounts it writable before CRI-O starts; without
