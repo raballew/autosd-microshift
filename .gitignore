@@ -1,3 +1,11 @@
+*.qcow2
 *.qcow2.gz
 .envrc
+.gitignore.lock
+forge_output/
+kernel-rpms/
 microshift/pull-secret.json
+microshift/ssh_host_*_key
+microshift/sshd-diag.conf
+microshift/sshd-diag.py
+tests/__pycache__/

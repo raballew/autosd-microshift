@@ -1,0 +1,12 @@
+[Unit]
+Description=Set static hostname for MicroShift
+Before=microshift.service
+After=systemd-hostnamed.service NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=hostnamectl set-hostname --static --transient microshift-host.local
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

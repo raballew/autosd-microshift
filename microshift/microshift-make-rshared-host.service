@@ -1,0 +1,11 @@
+[Unit]
+Description=Make root filesystem shared for MicroShift
+Before=microshift.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mount --make-rshared /
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

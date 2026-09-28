@@ -1,0 +1,4 @@
+node:
+  hostnameOverride: microshift-host.local
+ingress:
+  status: Removed

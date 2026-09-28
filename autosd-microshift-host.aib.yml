@@ -1,0 +1,142 @@
+name: autosd-microshift-host
+version: "0.1.0"
+target: qemu
+
+kernel:
+  kernel_package: kernel-automotive
+  kernel_version: "6.12.0-265_custom.el10iv"
+
+# Root partition — MicroShift runs directly on the host OS (no QM partition)
+content:
+  repos:
+    - id: automotive_sig
+      baseurl: https://mirror.stream.centos.org/SIGs/10-stream/autosd/$arch/packages-main/
+    - id: microshift-ocp-dev-preview
+      baseurl: https://mirror.openshift.com/pub/openshift-v5/aarch64/microshift/ocp-dev-preview/latest-5.0/el10/os/
+      priority: 10
+    # cri-o, cri-tools, openshift-clients (el9 packages; no el10 equivalent exists yet)
+    - id: openshift-mirror-4.22-beta
+      baseurl: https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rpms/4.22-el9-beta/
+      priority: 20
+    - id: openshift-mirror-4.23-beta
+      baseurl: https://mirror.openshift.com/pub/openshift-v4/aarch64/dependencies/rpms/4.23-el9-beta/
+      priority: 20
+  rpms:
+    - chrony
+    - firewalld
+    - kernel-automotive-modules-extra-6.12.0-265_custom.el10iv
+    - microshift
+    - microshift-networking
+    - NetworkManager
+    - openssh-server
+  add_files:
+    # Set hostname to non-localhost so MicroShift external cert does not claim DNS:localhost;
+    # without this, MicroShift's SNI cert selection serves the external cert for localhost:6443
+    # which breaks internal TLS verification (external signer != localhost signer).
+    - path: /etc/hostname
+      source_path: hostname
+    # MicroShift config: override node hostname to match /etc/hostname
+    - path: /etc/microshift/config.yaml
+      source_path: microshift/config-host.yaml
+    - path: /etc/firewalld/zones/public.xml
+      source_path: firewalld/host-public.xml
+    - path: /etc/firewalld/zones/trusted.xml
+      source_path: firewalld/host-trusted.xml
+    - path: /etc/ssh/authorized_keys
+      source_path: ssh-authorized-keys
+    - path: /etc/ssh/sshd_config.d/90-authorized-keys.conf
+      source_path: sshd-authorized-keys.conf
+    # Load OVS and nft_compat kernel modules on first boot
+    - path: /etc/modules-load.d/openvswitch.conf
+      source_path: modules-load.d/openvswitch.conf
+    # Set system clock from HTTPS Date header before chronyd starts (NTP UDP blocked in QEMU)
+    - path: /usr/bin/http-timesync.sh
+      source_path: http-timesync.sh
+    - path: /etc/systemd/system/http-timesync.service
+      source_path: http-timesync.service
+    # Allow loopback-originated packets to be forwarded (MicroShift service routing)
+    - path: /etc/sysctl.d/90-microshift-net.conf
+      source_path: sysctl/90-microshift-net.conf
+    # Make / rshared so MicroShift bind-mounts propagate into CRI-O containers
+    - path: /etc/systemd/system/microshift-make-rshared.service
+      source_path: microshift/microshift-make-rshared-host.service
+    # MicroShift must not time out while OVN-K pods are starting
+    - path: /etc/systemd/system/microshift.service.d/10-timeout.conf
+      source_path: microshift/microshift-timeout.conf
+    # Permissive container policy so CRI-O can pull images without signature check
+    - path: /etc/containers/policy.json
+      source_path: microshift/containers-policy.json
+    # Pull secret for MicroShift to pull component images from registry.redhat.io at runtime
+    - path: /etc/crio/openshift-pull-secret
+      source_path: microshift/pull-secret.json
+    # Patch ovnkube-master startup to ignore missing IPv6 sysctls (IPv6 disabled on QEMU host)
+    - path: /usr/bin/ovnkube-sysctl-patch.py
+      source_path: microshift/ovnkube-sysctl-patch.py
+    - path: /etc/systemd/system/ovnkube-sysctl-patch.service
+      source_path: microshift/ovnkube-sysctl-patch.service
+    - path: /etc/systemd/system/set-hostname.service
+      source_path: microshift/set-hostname.service
+    - path: /etc/NetworkManager/conf.d/99-disable-hostname.conf
+      source_path: NetworkManager/99-disable-hostname.conf
+    - path: /usr/bin/ukibootctl
+      source_path: microshift/ukibootctl
+    - path: /etc/systemd/system/ukiboot-set-success.service
+      source_path: microshift/ukiboot-set-success.service
+  make_dirs:
+    - path: /etc/microshift
+      mode: 0755
+      parents: true
+      exist_ok: true
+    - path: /etc/NetworkManager/conf.d
+      mode: 0755
+      parents: true
+      exist_ok: true
+    - path: /etc/systemd/system/microshift.service.d
+      mode: 0755
+      parents: true
+      exist_ok: true
+    - path: /var/log/journal
+      mode: 0755
+      parents: true
+      exist_ok: true
+  chmod_files:
+    - path: /usr/bin/http-timesync.sh
+      mode: "0755"
+      recursive: false
+    - path: /usr/bin/ovnkube-sysctl-patch.py
+      mode: "0755"
+      recursive: false
+    - path: /usr/bin/ukibootctl
+      mode: "0755"
+      recursive: false
+  systemd:
+    enabled_services:
+      - chronyd.service
+      - firewalld.service
+      - http-timesync.service
+      - microshift.service
+      - microshift-make-rshared.service
+      - NetworkManager.service
+      - ovnkube-sysctl-patch.service
+      - set-hostname.service
+      - sshd.service
+      - ukiboot-set-success.service
+    masked_services:
+      - greenboot-healthcheck.service
+      - greenboot-rollback.service
+      - greenboot-check.service
+      - redboot.target
+
+image:
+  image_size: "10 GiB"
+  selinux_mode: permissive
+
+auth:
+  # password: testpassword  (matches AUTOSD_ROOT_PASSWORD default in tests/conftest.py)
+  root_password: "$6$oiuI03SwxfSWmW87$q9rO7I5wDwp.DhG1E6mE/aiaE4nv.pt95QcbHrc1ybJ7K9Z5deHECc9EG8c9D/Ph6ilp4lIDexfCNaCRwNZHD0"
+  sshd_config:
+    PasswordAuthentication: true
+    PermitRootLogin: true
+
+network:
+  dynamic: {}

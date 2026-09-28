@@ -1,0 +1,13 @@
+[Unit]
+Description=Mark boot as successful in ukiboot partition
+After=dev-disk-by\x2dpartlabel-ukibootctl.device
+Requires=dev-disk-by\x2dpartlabel-ukibootctl.device
+ConditionPathExists=/dev/disk/by-partlabel/ukibootctl
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/ukibootctl --partition=/dev/disk/by-partlabel/ukibootctl mark-successful
+
+[Install]
+WantedBy=basic.target
